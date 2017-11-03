@@ -117,12 +117,27 @@ int main(void) {
 //	print("\np4\n");
 //	ar_free(p4);
 
-	void *p = ar_alloc(300);
-	ar_free(p);
-	p = ar_alloc(12);
-//	ar_free(p);
+	void *a,*b,*c;
 
-	fr(p);
+for(;;) {
+	a = ar_alloc(12);
+	b = ar_alloc(12);
+	c = ar_alloc(12);
+	ar_free(a);
+	ar_free(b);
+	ar_free(c);
+}
+
+	print("--------------\n");
+	fr(a);
+	PPR
+//	for (;;) {
+//		usleep(1000000);
+//		a = ar_alloc(12);
+//		ar_free(a);
+//	}
+
+//	fr(p);
 ///	PPR
 
 //	printf("-----------\n");

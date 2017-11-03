@@ -3,6 +3,7 @@
 //# ifdef __DEBUG
 #	include <stdio.h>
 //# endif
+# include <unistd.h>
 # define SHIFT 2
 # define PAGE_SIZE (1<<SHIFT)
 void *p = NULL;
@@ -61,10 +62,15 @@ void* ar_alloc(mdl_uint_t __bc) {
 						.above = (((mdl_u8_t*)blk-(mdl_u8_t*)p)<<1)|1, .below = blk->below,
 						.nextf = 0, .prevf = 0,
 						.flags = BLK_FREE,
-						.size = spare
+						.size = spare-sizeof(struct blkd)
 					};
-					blk->below = (((mdl_u8_t*)s-(mdl_u8_t*)p)<<1)|1;
-					((struct blkd*)((mdl_u8_t*)p+(s->below>>1)))->above = blk->below;
+					mdl_u32_t s_off = (mdl_u8_t*)s-(mdl_u8_t*)p;
+					//if (!s_off) s->above = 0;
+
+
+					blk->below = (s_off<<1)|1;
+					if (s->below&0x1)
+						((struct blkd*)((mdl_u8_t*)p+(s->below>>1)))->above = blk->below;
 					if (IS_FLAG(blk->flags, BLK_FREE))
 						blk->flags ^= BLK_FREE;
 					blk->flags |= BLK_USED;
@@ -78,6 +84,7 @@ void* ar_alloc(mdl_uint_t __bc) {
 				blk->flags ^= BLK_FREE;
 			blk->flags |= BLK_USED;
 			_ret:
+			rechain(blk);
 			return (void*)((mdl_u8_t*)blk+sizeof(struct blkd));
 		}
 
@@ -86,7 +93,7 @@ void* ar_alloc(mdl_uint_t __bc) {
 		goto _lagain;
 	}
 	_nothing:
-
+	print("------\n");
 	if ((off = (off+(__bc+sizeof(struct blkd)))) > page_c*PAGE_SIZE) {
 		page_c+=(off>>SHIFT)+((off-((off>>SHIFT)*PAGE_SIZE))>0);
 		brk(p+(page_c*PAGE_SIZE));
