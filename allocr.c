@@ -18,19 +18,35 @@ struct blkd {
 	mdl_u32_t above, below;
 	mdl_u32_t nextf, prevf;
 	mdl_u8_t flags;
-	mdl_uint_t size;
+	mdl_u32_t size;
 };
 
 void ar_init() {
-	p = sbrk(0);
+	if ((p = sbrk(0)) < 0) {
+# ifdef __DEBUG
+		print("sbrk error.\n");
+# endif
+	}
 }
 
 void ar_de_init() {
-	brk(p);
+	if (brk(p) < 0) {
+# ifdef __DEBUG
+		print("brk error.\n");
+# endif
+	}
 }
 
 void static rechain(struct blkd *__blk) {
 	mdl_u32_t off = (mdl_u8_t*)__blk-(mdl_u8_t*)p;
+	if (off < (first_blk>>1) || !(first_blk&0x1)) {
+		first_blk = (off<<1)|1;
+	}
+
+	if (off > (last_blk>>1) || !(last_blk&0x1)) {
+		last_blk = (off<<1)|1;
+	}
+
 	if (__blk->above&0x1)
 		((struct blkd*)((mdl_u8_t*)p+(__blk->above>>1)))->below = (off<<1)|1;
 	if (__blk->below&0x1)
@@ -38,6 +54,14 @@ void static rechain(struct blkd *__blk) {
 }
 
 void static unchain(struct blkd *__blk) {
+	mdl_u32_t off = (mdl_u8_t*)__blk-(mdl_u8_t*)p;
+	if (off == first_blk>>1) {
+		first_blk = __blk->below;
+	}
+	if (off == last_blk>>1) {
+		last_blk = __blk->above;
+	}
+
 	if (__blk->above&0x1)
 		((struct blkd*)((mdl_u8_t*)p+(__blk->above>>1)))->below = __blk->below;
 	if (__blk->below&0x1)
@@ -46,12 +70,14 @@ void static unchain(struct blkd *__blk) {
 
 void static unchain_f(struct blkd*);
 
-void* ar_alloc(mdl_uint_t __bc) {
+void* ar_alloc(mdl_u32_t __bc) {
 	if (ffree&0x1) {
 		struct blkd *blk = (struct blkd*)((mdl_u8_t*)p+(ffree>>1));
 		_lagain:
 		if (blk->size >= __bc) {
+# ifdef __DEBUG
 			print("found free space!\n");
+# endif
 			unchain_f(blk);
 			if (blk->size > __bc) {
 				mdl_u32_t spare = blk->size-__bc;
@@ -65,9 +91,6 @@ void* ar_alloc(mdl_uint_t __bc) {
 						.size = spare-sizeof(struct blkd)
 					};
 					mdl_u32_t s_off = (mdl_u8_t*)s-(mdl_u8_t*)p;
-					//if (!s_off) s->above = 0;
-
-
 					blk->below = (s_off<<1)|1;
 					if (s->below&0x1)
 						((struct blkd*)((mdl_u8_t*)p+(s->below>>1)))->above = blk->below;
@@ -93,10 +116,16 @@ void* ar_alloc(mdl_uint_t __bc) {
 		goto _lagain;
 	}
 	_nothing:
-	print("------\n");
 	if ((off = (off+(__bc+sizeof(struct blkd)))) > page_c*PAGE_SIZE) {
 		page_c+=(off>>SHIFT)+((off-((off>>SHIFT)*PAGE_SIZE))>0);
-		brk(p+(page_c*PAGE_SIZE));
+		if (brk(p+(page_c*PAGE_SIZE)) < 0) {
+# ifdef __DEBUG
+			print("brk error.\n");
+# endif
+		}
+# ifdef __DEBUG
+		print("size: %u\n", page_c*PAGE_SIZE);
+# endif
 	}
 
 	struct blkd *blk = (struct blkd*)((mdl_u8_t*)p+(off-(sizeof(struct blkd)+__bc)));
@@ -106,7 +135,9 @@ void* ar_alloc(mdl_uint_t __bc) {
 		.flags = BLK_USED,
 		.size = __bc
 	};
-
+# ifdef __DEBUG
+	print("off: %u, last_blk: %u\n", off-(sizeof(struct blkd)+__bc), last_blk>>1);
+# endif
 	if (!(first_blk&0x1)) {
 		first_blk = (((mdl_u8_t*)blk-(mdl_u8_t*)p)<<1)|1;
 	}
@@ -124,45 +155,45 @@ void* ar_alloc(mdl_uint_t __bc) {
 }
 
 void unchain_f(struct blkd *__blk) {
-	if (((mdl_u8_t*)__blk-(mdl_u8_t*)p) == (ffree>>1)) {
-		ffree = 0;
-		lastf = 0;
-	}
+	mdl_u32_t off = (mdl_u8_t*)__blk-(mdl_u8_t*)p;
+	if (off == (ffree>>1))
+		ffree = __blk->nextf;
+	if (off == (lastf>>1))
+		lastf = __blk->prevf;
 
 	struct blkd *next = (struct blkd*)((mdl_u8_t*)p+(__blk->nextf>>1));
 	struct blkd *prev = (struct blkd*)((mdl_u8_t*)p+(__blk->prevf>>1));
 
-	if (__blk->nextf&0x1) {
+	if (__blk->nextf&0x1)
 		next->prevf = __blk->prevf;
-	}
-
-	if (__blk->prevf&0x1) {
-		if (__blk->prevf == ffree) lastf = ffree;
+	if (__blk->prevf&0x1)
 		prev->nextf = __blk->nextf;
-	}
+
 	__blk->nextf = 0;
 	__blk->prevf = 0;
 }
 
 void pr() {
 	struct blkd *blk = (struct blkd*)((mdl_u8_t*)p+(first_blk>>1));
+	if (first_blk&0x1) {
 	while(1) {
-		print("state: %s\tsize: %u \tis upper? %s\tis below? %s\tnextf: %s\tprevf: %s\n", IS_FLAG(blk->flags, BLK_USED)?"used":"free", blk->size,
-			(blk->above&0x1)?"yes":"no", (blk->below&0x1)?"yes":"no", (blk->nextf&0x1)?"yes":"no", (blk->prevf&0x1)?"yes":"no");
+		print("state: %s\tsize: %u \tis upper? %s{%u}\tis below? %s{%u}\tnextf: %s\tprevf: %s, off: %u\n", IS_FLAG(blk->flags, BLK_USED)?"used":"free", blk->size,
+			(blk->above&0x1)?"yes":"no", blk->above>>1, (blk->below&0x1)?"yes":"no", blk->below>>1, (blk->nextf&0x1)?"yes":"no", (blk->prevf&0x1)?"yes":"no", (mdl_u8_t*)blk-(mdl_u8_t*)p);
 		if (!(blk->below&0x1)) break;
 		blk = (struct blkd*)((mdl_u8_t*)p+(blk->below>>1));
-	}
+	}}
 }
 
 # include <unistd.h>
 void fr() {
 	struct blkd *blk = (struct blkd*)((mdl_u8_t*)p+(ffree>>1));
+	if (ffree&0x1) {
 	while(1) {
 		usleep(1000000);
 		print("state: %s, size: %u, off: %lu\n", IS_FLAG(blk->flags, BLK_USED)?"used":"free", blk->size, (mdl_u8_t*)blk-(mdl_u8_t*)p);
 		if (!(blk->nextf&0x1)) break;
 		blk = (struct blkd*)((mdl_u8_t*)p+(blk->nextf>>1));
-	}
+	}}
 }
 
 void ar_free(void *__p) {
@@ -170,10 +201,14 @@ void ar_free(void *__p) {
 	unchain(blk);
 	// search upper&lower blocks  if free and murge all into one free
 	if (blk->above&0x1) {
+# ifdef __DEBUG
 	print("upper block located.\n");
+# endif
 	above = (struct blkd*)((mdl_u8_t*)p+(blk->above>>1));
 	while(IS_FLAG(above->flags, BLK_FREE)) {
+# ifdef __DEBUG
 		print("found free space above, size: %u\n", above->size);
+# endif
 		unchain_f(above);
 		unchain(above);
 		above->size += blk->size+sizeof(struct blkd);
@@ -184,10 +219,14 @@ void ar_free(void *__p) {
 	}
 
 	if (blk->below&0x1) {
+# ifdef ___DEBUG
 	print("lower block located.\n");
+# endif
 	below = (struct blkd*)((mdl_u8_t*)p+(blk->below>>1));
 	while(IS_FLAG(below->flags, BLK_FREE)) {
+# ifdef __DEBUG
 		print("found free space below, size: %u\n", below->size);
+# endif
 		unchain_f(below);
 		unchain(below);
 		blk->size += below->size+sizeof(struct blkd);
@@ -196,9 +235,9 @@ void ar_free(void *__p) {
 		below = (struct blkd*)((mdl_u8_t*)p+(below->below>>1));
 	}
 	}
-
+# ifdef __DEBUG
 	print("freed %u bytes.\n", blk->size);
-
+# endif
 	if (lastf&0x1) {
 		blk->prevf = lastf;
 		((struct blkd*)((mdl_u8_t*)p+(lastf>>1)))->nextf = (((mdl_u8_t*)blk-(mdl_u8_t*)p)<<1)|1;
@@ -210,6 +249,51 @@ void ar_free(void *__p) {
 	lastf = (((mdl_u8_t*)blk-(mdl_u8_t*)p)<<1)|1;
 	if (IS_FLAG(blk->flags, BLK_USED)) blk->flags ^= BLK_USED;
 	blk->flags |= BLK_FREE;
-
 	rechain(blk);
+}
+
+mdl_u8_t static inited = 0;
+void* malloc(size_t __n) {
+	if (!__n) return NULL;
+# ifdef __DEBUG
+	print("malloc.\n");
+# endif
+	if (!inited) {
+		ar_init();
+		inited = 1;
+	}
+	void *p = ar_alloc(__n);
+	return p;
+}
+
+void free(void *__p) {
+	if (!__p) return;
+# ifdef __DEBUG
+	print("free.\n");
+# endif
+	ar_free(__p);
+}
+
+# include <string.h>
+void* realloc(void *__p, size_t __n) {
+# ifdef __DEBUG
+	print("realloc. %u, %u\n", __p, __n);
+# endif
+	if (!__n) return NULL;
+	void *p = malloc(__n&0xFF);
+	mdl_u32_t size = ((struct blkd*)((mdl_u8_t*)__p-sizeof(struct blkd)))->size;
+	if (__n < size) size = __n;
+
+	mdl_u8_t *itr = (mdl_u8_t*)__p;
+	while(itr != (mdl_u8_t*)__p+size) {
+		mdl_u32_t off = itr-(mdl_u8_t*)__p;
+		if ((size-off) > sizeof(mdl_u64_t)) {
+			*((mdl_u64_t*)((mdl_u8_t*)p+off)) = *(mdl_u64_t*)itr;
+			itr+=sizeof(mdl_u64_t);
+		} else
+			*((mdl_u8_t*)p+off) = *(itr++);
+	}
+
+ 	free(__p);
+	return p;
 }

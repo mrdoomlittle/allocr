@@ -11,78 +11,8 @@ void print_bin(mdl_u8_t __val) {
 # define MB(__lval, __rval)((lval|rval)^(lval&rval))
 extern void pr();
 extern void fr();
-mdl_uint_t int_to_str(mdl_u64_t __val, char *__buff) {
-	if (!__val) {
-		*(__buff++) = '0';
-		*__buff = '\0';
-		return 1;
-	}
-
-	mdl_u64_t unit = 1, nol = 0;
-	for (;unit <= __val;unit*=10,nol++);
-	unit /=10;
-
-	char *itr = __buff;
-	mdl_u64_t g = 0;
-	while(itr != __buff+nol) {
-		switch((__val-(g*(unit*10)))/unit) {
-			case 0: *itr = '0';break;
-			case 1: *itr = '1';break;
-			case 2: *itr = '2';break;
-			case 3: *itr = '3';break;
-			case 4: *itr = '4';break;
-			case 5: *itr = '5';break;
-			case 6: *itr = '6';break;
-			case 7: *itr = '7';break;
-			case 8: *itr = '8';break;
-			case 9: *itr = '9';break;
-		}
-
-		g = __val/unit;
-		unit /=10;
-		itr++;
-	}
-
-	*itr = '\0';
-	return nol;
-}
-
-# include <stdarg.h>
-void print(char const *__s, ...) {
-	char static buf[1024];
-	char *buf_itr = buf;
-	va_list args;
-	va_start(args, __s);
-
-	char *itr = (char*)__s;
-	for (;*itr != '\0';itr++) {
-		if (*itr == '%') {
-			if (*(itr+1) == 'u') {
-				mdl_u32_t v = va_arg(args, mdl_u32_t);
-				buf_itr+= int_to_str(v, buf_itr);
-				itr++;
-			} else if (*(itr+1) == 'l') {
-				if (*(itr+2) == 'u') {
-					mdl_u64_t v = va_arg(args, mdl_u64_t);
-					buf_itr+= int_to_str(v, buf_itr);
-					itr++;
-				}
-				itr++;
-			} else if (*(itr+1) == 's') {
-				char *s = (char*)va_arg(args, char const*);
-				for (;*s != '\0';s++) *(buf_itr++) = *s;
-				itr++;
-			}
-			itr++;
-		}
-		*(buf_itr++) = *itr;
-	}
-
-	va_end(args);
-	*buf_itr = '\0';
-	sprint(buf);
-}
-
+extern mdl_u32_t ffree;
+# include <string.h>
 # define PPR print("<---------->\n");pr();
 int main(void) {
 //	print("Goodbye\n");
@@ -116,21 +46,109 @@ int main(void) {
 
 //	print("\np4\n");
 //	ar_free(p4);
-
-	void *a,*b,*c;
-
-for(;;) {
-	a = ar_alloc(12);
-	b = ar_alloc(12);
-	c = ar_alloc(12);
-	ar_free(a);
-	ar_free(b);
-	ar_free(c);
-}
-
-	print("--------------\n");
+//	ar_free(c);
+//	ar_free(e);
+/*
+	print("|-------------------------------------|\n");
 	fr(a);
+	print("\n");
+
+	ar_free(b);
+*/
+	print("|-------------------------------------|\n");
+	void *a,*b,*c,*d,*e;
+
+//	b = ar_alloc(20);
+//	c = ar_alloc(30);
+//	d = ar_alloc(40);
+//	e = ar_alloc(50);
+
+//	ar_free(e);
+//	ar_free(d);
+
+//	ar_free(a);
+//	ar_free(b);
+
+//	ar_free(c);
+/*
+	ar_free(a);
+	ar_alloc(2);
+	a = ar_alloc(2);
+
+	mdl_u8_t i = 1;
+	for (;i != n;i++) {
+		b = ar_alloc((i+1)*10);
+		ar_free(a);
+		a = b;
+	}
+*/
+//	b = ar_alloc(44);
+//	c = ar_alloc(45);
+//	d = ar_alloc(66);
+
+//	a = ar_alloc(100);
+//	memset(a, 0xFF, 1);
+/*
+	mdl_uint_t i = 0;
+	for (;i != n;i++) {
+		b = ar_alloc(i+1);
+		ar_free(a);
+		a = b;
+	}
+
+	i = 0;
+	for (;i != n;i++) {
+		*(((mdl_u8_t*)a+i)) = 0xFF;
+	}
+
+	ar_alloc(100);
+
+	i = 0;
+	for (;i != n;i++) {
+		print("%u\n", *(((mdl_u8_t*)a+i)));
+	}
+*/
+//	b = ar_alloc(20);
+//	memset(b, 0xFF, 20);
+//	c = ar_alloc(30);
+//	d = ar_alloc(40);
+//	e = ar_alloc(50);
+
+//	ar_free(a);
+//	ar_free(b);
+//	ar_free(c);
+//	ar_free(d);
+//	ar_free(e);
+
+
+	print("|-------------------------------------|\n");
+
+	//print("freed: %u, alloced: %u\n", f, al);
+//	ar_alloc(200);
+
+//	a = ar_alloc(247);
+//	b = ar_alloc(44);
+//	c = ar_alloc(55);
+//	d = ar_alloc(66);
+//	e = ar_alloc(77);
+
+//	a = ar_alloc(1);
+/*
+	mdl_u8_t i = 0;
+	for (;i != 8;i++) {
+	usleep(100000);
+	b = ar_alloc((i+1)*10);
+	ar_free(a);
+	a = b;
+	print("|--------------------|\n");
+	}
+*/
+//	ar_free(ar_alloc(200));
+	print("|-------------------------------------|\n");
+	fr();
 	PPR
+
+	ar_de_init();
 //	for (;;) {
 //		usleep(1000000);
 //		a = ar_alloc(12);
@@ -148,3 +166,4 @@ for(;;) {
 //	p = ar_alloc(10);
 //	ar_free(p);
 }
+
