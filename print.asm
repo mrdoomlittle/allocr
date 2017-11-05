@@ -1,5 +1,3 @@
-section .data
-	msg db "Hello"
 section .text
 global sprint
 sprint:
