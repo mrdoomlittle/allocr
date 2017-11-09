@@ -280,7 +280,8 @@ void* realloc(void *__p, size_t __n) {
 	print("realloc. %u, %u\n", __p, __n);
 # endif
 	if (!__n) return NULL;
-	void *p = malloc(__n&0xFF);
+	void *p = malloc(__n);
+	if (!__p) return p;
 	mdl_u32_t size = ((struct blkd*)((mdl_u8_t*)__p-sizeof(struct blkd)))->size;
 	if (__n < size) size = __n;
 
