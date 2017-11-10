@@ -1,1 +1,1 @@
-gcc test.c -Llib -lallocr
+gcc -std=gnu11 test.c -Llib -lallocr

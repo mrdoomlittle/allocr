@@ -26,7 +26,7 @@ int main(void) {
 //	print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
 //	}
 
-	ar_init();
+//	ar_init();
 //	void *p1 = ar_alloc(1);
 //	void *p2 = ar_alloc(1);
 //	void *p3 = ar_alloc(1);
@@ -148,7 +148,7 @@ int main(void) {
 	fr();
 	PPR
 
-	ar_de_init();
+//	ar_de_init();
 //	for (;;) {
 //		usleep(1000000);
 //		a = ar_alloc(12);

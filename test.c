@@ -1,14 +1,47 @@
 //# include <malloc.h>
+# define _GNU_SOURCE
 # include <string.h>
 # include <stdio.h>
 # include <mdlint.h>
 # include <stdlib.h>
 # include <string.h>
 # include <unistd.h>
-extern void pr();
-extern void fr();
+# include <sched.h>
+# include <signal.h>
+# include <sys/types.h>
+# include <sys/wait.h>
+# include <stdatomic.h>
+# include <pthread.h>
+extern struct allocr ar;
+extern void pr(struct allocr*);
+extern void fr(struct allocr*);
+extern void mutex_lock(mdl_u16_t*);
+extern void mutex_unlock(mdl_u16_t*);
+mdl_u16_t mutex = 0x0;
+mdl_u32_t val;
+// testing stuff
+int thr(void *__arg) {
+	mdl_u32_t i = 0;
+	while(i < 2222) {
+//		free(malloc(1));
+		mutex_lock(&mutex);
+		val++;
+		mutex_unlock(&mutex);
+		i++;
+	}
+	printf("finished.\n");
+}
+
 int main(int __argc, char const *__argv[]) {
 	printf("-------------------------------------------------------\n");
+	val = 0x0;
+//while(1) {
+	mutex_lock(&mutex);
+	mutex_unlock(&mutex);
+	printf("%u\n", (mdl_u8_t)mutex);
+//}
+//	return 0;
+/*
 	char const **itr = __argv;
 	for (;itr != __argv+__argc;itr++) {
 		printf("%s\n", *itr);
@@ -25,9 +58,25 @@ int main(int __argc, char const *__argv[]) {
 	if (!strcmp(s, "exit")) break;
 	free(s);
 	}
+*/
+	void *sp = malloc(2048);
+	pid_t pid = clone(&thr, (mdl_u8_t*)sp+2048, CLONE_VM|CLONE_SIGHAND|CLONE_FILES|CLONE_FS|SIGCHLD, NULL);
+	mdl_u32_t i = 0;
+	while(i < 2222) {
+//		free(malloc(1));
+		mutex_lock(&mutex);
+        val++;
+		mutex_unlock(&mutex);
+		i++;
+	}
 
-	fr();
-	pr();
+	printf("----\n");
+	waitpid(pid, NULL, 0);
+	printf("%d\n", val);
+
+	free(sp);
+	fr(&ar);
+	pr(&ar);
 /*
 	mdl_u8_t *p = (mdl_u8_t*)malloc(200);
 	memset(p, 0xFF, 200);
