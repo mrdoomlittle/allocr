@@ -46,7 +46,20 @@ void print(char const *__s, ...) {
 	char *itr = (char*)__s;
 	for (;*itr != '\0';itr++) {
 		if (*itr == '%') {
-			if (*(itr+1) == 'u') {
+			if (*(itr+1) == 'd') {
+				mdl_i32_t v = va_arg(args, mdl_i32_t);
+				mdl_u32_t vv;
+				mdl_u8_t neg = 0;
+				if (v < 0) {
+					vv = v-(v<<1);
+					neg = 1;
+				} else
+					vv = v;
+				if (neg)
+					*(buf_itr++) = '-';
+				buf_itr+= int_to_str(vv, buf_itr);
+				itr++;
+			} else if (*(itr+1) == 'u') {
 				mdl_u32_t v = va_arg(args, mdl_u32_t);
 				buf_itr+= int_to_str(v, buf_itr);
 				itr++;
@@ -60,6 +73,9 @@ void print(char const *__s, ...) {
 			} else if (*(itr+1) == 's') {
 				char *s = (char*)va_arg(args, char const*);
 				for (;*s != '\0';s++) *(buf_itr++) = *s;
+				itr++;
+			} else if (*(itr+1) == 'c') {
+				*(buf_itr++) = (mdl_u8_t)va_arg(args, mdl_u32_t);
 				itr++;
 			}
 			itr++;
