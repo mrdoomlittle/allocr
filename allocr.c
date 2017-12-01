@@ -7,12 +7,17 @@
 # include <sys/resource.h>
 # include <sys/mman.h>
 
-# define PILE_IPC 2
+# define ALIGN 8
+# define align_to(__val, __to)((__val+(__to-1))&((~__to)+1))
+# define is_aligned_to(__val, __align)(((__val&__align) == __align)||!(__val&__align))
+# define PILE_IPC 6
 # define PAGE_SHIFT 7
 # define PAGE_SIZE (1<<PAGE_SHIFT)
+# define DESLICE_THRESH 8
 
-# define get_blkd(__p)((struct ar_blkd*)((mdl_u8_t*)(__p)-sizeof(struct ar_blkd)))
-# define BLK_PADDING
+# define BIN_LOOKUP_DEPTH
+
+# define NEW_PILE_FLG (1<<7)
 # define BLK_FREE_FLG (1<<7)
 # define BLK_USED_FLG (1<<6)
 # define BLK_MMAPED_FLG (1<<5)
@@ -20,22 +25,39 @@
 
 # define is_free(__blk) is_flag(__blk->flags, BLK_FREE_FLG)
 # define is_used(__blk) is_flag(__blk->flags, BLK_USED_FLG)
-# define BNO(__bc) \
-	(((mdl_u32_t)(__bc))>>7 >= (1<<7)? ((1<<7)+((((mdl_u32_t)(__bc))-(1<<7))>>31)):(((mdl_u32_t)(__bc))>>7))
+
+# define set_free(__blk) \
+	if (is_flag(__blk->flags, BLK_USED_FLG)) \
+		__blk->flags ^= BLK_USED_FLG; \
+	__blk->flags |= BLK_FREE_FLG;
+
+# define set_used(__blk) \
+	if (is_flag(__blk->flags, BLK_FREE_FLG)) \
+		__blk->flags ^= BLK_FREE_FLG; \
+	__blk->flags |= BLK_USED_FLG;
+
+# define bin_no(__bc) \
+	(((mdl_u32_t)(__bc))>>7 >= (1<<7)?((1<<7)/*+((((mdl_u32_t)(__bc))-(1<<7))>>31)*/):(((mdl_u32_t)(__bc))>>7))
+
 # define NO_BINS 128
 # define is_set(__v)(__v&0x1)
-# define BIN(__pile, __bc) (__pile->bins+BNO(__bc))
-
+# define bin_at(__pile, __bc) (__pile->bins+bin_no(__bc))
+# define get_off(__p1, __p2) ((mdl_u8_t*)__p2-(mdl_u8_t*)__p1)
+# define incr_pile_off(__pile, __by) pile->off+=__by
+# define decr_pile_off(__pile, __by) pile->off-=__by
 # define __DEBUG
 typedef mdl_u32_t ar_off_t;
 typedef mdl_u32_t ar_size_t;
-
+typedef mdl_u32_t ar_uint_t;
 struct ar_blkd {
 	ar_off_t prev, next, fd, bk;
 	ar_size_t size;
 	ar_off_t off;
 	mdl_u8_t flags;
 } __attribute__((packed));
+
+# define blkd_size sizeof(struct ar_blkd)
+# define get_blkd(__p)((struct ar_blkd*)((mdl_u8_t*)(__p)-sizeof(struct ar_blkd)))
 
 struct pile_info {
 	mdl_u32_t m_used, m_free;
@@ -48,39 +70,43 @@ struct ar_pile {
 	mdl_uint_t page_c;
 	ar_off_t blk, end_blk;
 	ar_off_t free;
-	mdl_uint_t blk_c;
+	ar_uint_t blk_c;
 	struct pile_info info;
 } __attribute__((packed));
 
 struct allocr {
-	mdl_uint_t no_piles;
+	void *sbrk_base;
+	ar_uint_t no_mmaps;
+	ar_uint_t no_piles;
 	struct ar_pile *pile;
 };
 
 static struct allocr ar;
-
-# define ar_set_pile_info_m_used(__pile, __val) \
+# define set_pile_info_m_used(__pile, __val) \
 	__pile->info.m_used = __val;\
 	__pile->info.m_free = (__pile->page_c*PAGE_SIZE)-__pile->info.m_used;
 
-# define ar_set_pile_info_m_free(__pile, __val) \
+# define set_pile_info_m_free(__pile, __val) \
 	__pile->info.m_free = __val;\
 	__pile->info.m_used = (__pile->page_c*PAGE_SIZE)-__pile->info.m_free;
 
 void ar_prepare() {
 	ar = (struct allocr) {
-		.no_piles = 0, .pile = NULL
+		.sbrk_base = sbrk(0),
+		.no_mmaps = 0,
+		.no_piles = 0,
+		.pile = NULL
 	};
 }
 
 void ar_cleanup() {
-
+	brk(ar.sbrk_base);
 }
 
 struct ar_pile* suitable_pile(struct allocr *__ar, mdl_uint_t __bc) {
 	struct ar_pile *pile = __ar->pile;
 	while(pile != NULL) {
-		if (pile->info.m_free-(pile->blk_c*sizeof(struct ar_blkd)) >= (__bc+sizeof(struct ar_blkd)) || (pile->page_c*PAGE_SIZE)-pile->off >= (__bc+sizeof(struct ar_blkd))) return pile;
+		if (pile->info.m_free >= (__bc+blkd_size) || (pile->page_c*PAGE_SIZE)-pile->off >= (__bc+blkd_size)) return pile;
 		pile = pile->next;
 	}
 	return NULL;
@@ -128,7 +154,7 @@ void static blk_unchain(struct ar_pile *__pile, struct ar_blkd *__blk) {
 void dechain_free(struct ar_pile *__pile, struct ar_blkd *__blk) {
 	mdl_u32_t off = (mdl_u8_t*)__blk-(mdl_u8_t*)__pile->p;
 	if (off == __pile->free>>1) __pile->free = __blk->fd;
-	mdl_u32_t *bin = BIN(__pile, __blk->size);
+	mdl_u32_t *bin = bin_at(__pile, __blk->size);
 	if ((*bin)>>1 == off) *bin = __blk->fd;
 
 	if (is_set(__blk->fd))
@@ -140,21 +166,29 @@ void dechain_free(struct ar_pile *__pile, struct ar_blkd *__blk) {
 }
 
 void pr() {
+	print("program memory size: %u\n", get_off(ar.sbrk_base, sbrk(0)));
+	print("no. maped memory regions: %u\n", ar.no_mmaps);
+
 	struct ar_pile *pile = ar.pile;
 	struct ar_blkd *blk;
 	mdl_uint_t pile_no = 0, blk_no;
+	mdl_u32_t cal_used = 0;
 	while(pile != NULL) {
 		blk_no = 0;
-		print("-> pile no. %u\n", pile_no++);
+		print("-> pile no. %u, info{m_used: %u, m_free: %u}\n", pile_no++, pile->info.m_used, pile->info.m_free);
 		if (is_set(pile->blk)) {
 			blk = (struct ar_blkd*)((mdl_u8_t*)pile->p+(pile->blk>>1));
 			_next_blk:
+			if (is_used(blk))
+				cal_used+=blk->size;
+
 			print(" blk; state: %s, is_prev: %s, is_next: %s, size: %u\n", is_used(blk)?"used":"free", is_set(blk->prev)?"yes":"no", is_set(blk->next)?"yes":"no", blk->size);
 			if (is_set(blk->next)) {
 				blk = (struct ar_blkd*)((mdl_u8_t*)pile->p+(blk->next>>1));
 				goto _next_blk;
 			}
 		}
+		print("cal_used: %u\n", cal_used);
 		print("/\n");
 		pile = pile->next;
 	}
@@ -165,10 +199,11 @@ void fr() {
 }
 
 void _ar_free(struct allocr*, void*);
-void* _ar_alloc(struct allocr *__ar, mdl_uint_t __bc) {
-	if ((__bc+sizeof(struct ar_blkd)) > PILE_IPC*PAGE_SIZE) {
+void* _ar_alloc(struct allocr *__ar, mdl_uint_t __bc, mdl_u8_t __flags) {
+	if ((__bc+blkd_size) > PILE_IPC*PAGE_SIZE) {
+		print("mmap.\n");
 		void *p;
-		if ((p = mmap(NULL, sizeof(struct ar_blkd)+__bc, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)) == (void*)-1) {
+		if ((p = mmap(NULL, blkd_size+__bc, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)) == (void*)-1) {
 			print("failed to map memory region for oversized block.\n");
 			return NULL;
 		}
@@ -179,17 +214,23 @@ void* _ar_alloc(struct allocr *__ar, mdl_uint_t __bc) {
 			.flags = BLK_MMAPED_FLG
 		};
 
-		return (void*)((mdl_u8_t*)p+sizeof(struct ar_blkd));
+		__ar->no_mmaps++;
+		return (void*)((mdl_u8_t*)p+blkd_size);
 	}
 
 	struct ar_pile *pile = suitable_pile(__ar, __bc);
-	if (pile == NULL) {
+	if (pile == NULL || is_flag(__flags, NEW_PILE_FLG)) {
 # ifdef __DEBUG
 		print("new pile.\n");
 # endif
 		mdl_uint_t page_c = PILE_IPC;
 		void *p = sbrk(0), *end;
-		brk(end = (p+(sizeof(struct ar_pile)+(page_c*PAGE_SIZE))));
+		if (p == (void*)-1) {
+			print("sbrk failure.\n");
+		}
+		if (brk(end = (void*)((mdl_u8_t*)p+(sizeof(struct ar_pile)+(page_c*PAGE_SIZE)))) == -1) {
+			print("brk failure.\n");
+		}
 		*(pile = (struct ar_pile*)p) = (struct ar_pile){
 			.p = (mdl_u8_t*)p+sizeof(struct ar_pile), .end = end,
 			.prev = NULL, .next = NULL,
@@ -202,18 +243,18 @@ void* _ar_alloc(struct allocr *__ar, mdl_uint_t __bc) {
 
 	if (is_set(pile->free)) {
 		struct ar_blkd *blk;
-		ar_off_t f_off = 0;
-		mdl_u32_t *bin = BIN(pile, __bc);
+		ar_off_t f_off;
+		mdl_u32_t *bin = bin_at(pile, __bc);
 		mdl_u32_t *end = bin+4;
 		while(bin != end && bin != bin+NO_BINS) {
 			if (is_set(*bin)) {
-				f_off = *bin>>1;
+				f_off = (*bin)>>1;
 				blk = (struct ar_blkd*)((mdl_u8_t*)pile->p+f_off);
 				if (blk->size >= __bc) goto _found;
 				else {
 					while(is_set(blk->fd)) {
-						if (bin+1 != bin+NO_BINS)
-							if (*(bin+1) == blk->fd) goto _nope;
+						if (bin+1 < bin+NO_BINS)
+							if (is_set(*(bin+1)) && *(bin+1) == blk->fd) break;
 
 						f_off = blk->fd>>1;
 						blk = (struct ar_blkd*)((mdl_u8_t*)pile->p+(blk->fd>>1));
@@ -224,42 +265,43 @@ void* _ar_alloc(struct allocr *__ar, mdl_uint_t __bc) {
 			bin++;
 		}
 
+		// new pile
+		if ((pile->page_c*PAGE_SIZE)-pile->off < (blkd_size+__bc))
+			return _ar_alloc(__ar, __bc, NEW_PILE_FLG);
 		goto _nope;
+
 		_found:
-		ar_set_pile_info_m_used(pile, pile->info.m_used+blk->size);
+		set_pile_info_m_used(pile, pile->info.m_used+blk->size+blkd_size);
 		dechain_free(pile, blk);
 
-		if (is_flag(blk->flags, BLK_FREE_FLG))
-			blk->flags ^= BLK_FREE_FLG;
-		blk->flags |= BLK_USED_FLG;
+		set_used(blk);
 		blk_rechain(pile, blk);
 
-		mdl_u32_t spare;
-		if (blk->size > __bc && (spare = (blk->size-__bc)) > sizeof(struct ar_blkd)) {
-			void *p = (mdl_u8_t*)blk+(sizeof(struct ar_blkd)+__bc);
+		mdl_u32_t junk;
+		if (blk->size > __bc && (junk = (blk->size-__bc)) > (blkd_size+DESLICE_THRESH)) {
+			void *p = (void*)((mdl_u8_t*)blk+(blkd_size+__bc));
 			struct ar_blkd *s = (struct ar_blkd*)p;
 			mdl_u32_t s_off;
 			*s = (struct ar_blkd) {
 				.prev = (((mdl_u8_t*)blk-(mdl_u8_t*)pile->p)<<1)|1, .next = blk->next, .fd = 0, .bk = 0,
-				.size = spare-sizeof(struct ar_blkd), .off = (s_off = ((mdl_u8_t*)p-(mdl_u8_t*)pile->p))+sizeof(struct ar_pile),
+				.size = junk-blkd_size, .off = (s_off = ((mdl_u8_t*)p-(mdl_u8_t*)pile->p))+sizeof(struct ar_pile),
 				.flags = 0x0
 			};
 			blk->size = __bc;
 			blk->next = (s_off<<1)|1;
 			if (is_set(s->next)) ((struct ar_blkd*)((mdl_u8_t*)pile->p+(s->next>>1)))->prev = (s_off<<1)|1;
-			_ar_free(__ar, (void*)((mdl_u8_t*)s+sizeof(struct ar_blkd)));
 			pile->blk_c++;
+			_ar_free(__ar, (void*)((mdl_u8_t*)p+blkd_size));
 		}
-		return (void*)((mdl_u8_t*)blk+sizeof(struct ar_blkd));
+		return (void*)((mdl_u8_t*)blk+blkd_size);
 	}
 
 	_nope:
 
 	{
 	void *p = (void*)((mdl_u8_t*)pile->p+pile->off);
-
 	struct ar_blkd *blk = (struct ar_blkd*)p;
-	mdl_u32_t off = (mdl_u8_t*)blk-(mdl_u8_t*)pile->p;
+	mdl_u32_t off = get_off(pile->p, blk);
 	*blk = (struct ar_blkd) {
 		.prev = 0, .next = 0, .fd = 0, .bk = 0,
 		.size = __bc, .off = off+sizeof(struct ar_pile),
@@ -275,12 +317,12 @@ void* _ar_alloc(struct allocr *__ar, mdl_uint_t __bc) {
 	}
 
 	pile->end_blk = (off<<1)|1;
-	pile->off+= sizeof(struct ar_blkd)+__bc;
-	ar_set_pile_info_m_used(pile, pile->info.m_used+__bc);
+	incr_pile_off(pile, blkd_size+__bc);
+	set_pile_info_m_used(pile, pile->info.m_used+__bc+blkd_size);
 	pile->blk_c++;
 
 //	print("%u - %u - %u\n", pile->off, pile->info.m_free, pile->page_c*PAGE_SIZE);
-	return (void*)((mdl_u8_t*)p+sizeof(struct ar_blkd));
+	return (void*)((mdl_u8_t*)p+blkd_size);
 	}
 }
 
@@ -288,21 +330,21 @@ void* ar_alloc(mdl_uint_t __bc) {
 # ifdef __DEBUG
 	print("alloc: %u-bytes\n", __bc);
 # endif
-	return _ar_alloc(&ar, __bc);
+	return _ar_alloc(&ar, align_to(__bc, ALIGN), 0x0);
 }
 
 void _ar_free(struct allocr *__ar, void *__p) {
 	struct ar_blkd *blk = get_blkd(__p), *prev, *next;
 	if (is_flag(blk->flags, BLK_MMAPED_FLG)) {
-		if (munmap((void*)blk, sizeof(struct ar_blkd)+blk->size) < 0) {
+		if (munmap((void*)blk, blkd_size+blk->size) < 0) {
 			print("failed to unmap memory region.\n");
 		}
+		__ar->no_mmaps--;
 		return;
 	}
 
 	struct ar_pile *pile = (struct ar_pile*)((mdl_u8_t*)blk-blk->off);
-
-	ar_set_pile_info_m_free(pile, pile->info.m_free+blk->size);
+	set_pile_info_m_free(pile, pile->info.m_free+blk->size+blkd_size);
 	blk_unchain(pile, blk);
 	if (is_set(blk->prev)) {
 		prev = (struct ar_blkd*)((mdl_u8_t*)pile->p+(blk->prev>>1));
@@ -313,8 +355,7 @@ void _ar_free(struct allocr *__ar, void *__p) {
 			dechain_free(pile, prev);
 			blk_unchain(pile, prev);
 
-			prev->size += blk->size+sizeof(struct ar_blkd);
-			ar_set_pile_info_m_free(pile, pile->info.m_free+sizeof(struct ar_blkd));
+			prev->size += blk->size+blkd_size;
 			blk = prev;
 			pile->blk_c--;
 
@@ -332,8 +373,7 @@ void _ar_free(struct allocr *__ar, void *__p) {
 			dechain_free(pile, next);
 			blk_unchain(pile, next);
 
-			blk->size += next->size+sizeof(struct ar_blkd);
-			ar_set_pile_info_m_free(pile, pile->info.m_free+sizeof(struct ar_blkd));
+			blk->size += next->size+blkd_size;
 			blk->next = next->next;
 			pile->blk_c--;
 
@@ -344,14 +384,14 @@ void _ar_free(struct allocr *__ar, void *__p) {
 # ifdef __DEBUG
 	print("%u bytes are going to be freed.\n", blk->size);
 # endif
-	ar_off_t off = (mdl_u8_t*)blk-(mdl_u8_t*)pile->p;
-	if ((off+sizeof(struct ar_blkd)+blk->size) == pile->off) {
+	ar_off_t off = get_off(pile->p, blk);
+	if (pile->off-off == blkd_size+blk->size) {
 		pile->off = off;
 		return;
 	}
 
 	blk_rechain(pile, blk);
-	ar_off_t *bin = BIN(pile, blk->size);
+	ar_off_t *bin = bin_at(pile, blk->size);
 	if (!is_set(*bin)) {
 		*bin = (off<<1)|1;
 		if (is_set(pile->free)) {
@@ -365,9 +405,7 @@ void _ar_free(struct allocr *__ar, void *__p) {
 	}
 
 	pile->free = (off<<1)|1;
-	if (is_flag(blk->flags, BLK_USED_FLG))
-		blk->flags ^= BLK_USED_FLG;
-	blk->flags |= BLK_FREE_FLG;
+	set_free(blk);
 }
 
 void ar_free(void *__p) {
@@ -379,7 +417,22 @@ void ar_free(void *__p) {
 }
 
 void* _ar_realloc(struct allocr *__ar, void *__p, mdl_uint_t __bc) {
-	void *p = _ar_alloc(__ar, __bc);
+	void *p = _ar_alloc(__ar, __bc, 0x0);
+	mdl_u32_t size = get_blkd(__p)->size;
+ 	if (__bc < size) size = __bc;
+
+	mdl_u8_t *itr = (mdl_u8_t*)__p;
+	while(itr != (mdl_u8_t*)__p+size) {
+		mdl_u32_t off = itr-(mdl_u8_t*)__p;
+		if ((size-off) > sizeof(mdl_u64_t)) {
+			*((mdl_u64_t*)((mdl_u8_t*)p+off)) = *(mdl_u64_t*)itr;
+			itr+= sizeof(mdl_u64_t);
+		} else if ((size-off) > sizeof(mdl_u32_t)) {
+			*((mdl_u32_t*)((mdl_u8_t*)p+off)) = *(mdl_u32_t*)itr;
+			itr+= sizeof(mdl_u32_t);
+		} else
+			*((mdl_u8_t*)p+off) = *(itr++);
+	}
 	_ar_free(__ar, __p);
 	return p;
 }
@@ -388,5 +441,35 @@ void* ar_realloc(void *__p, mdl_uint_t __bc) {
 	return _ar_realloc(&ar, __p, __bc);
 }
 
+mdl_u8_t static preped = 0;
+void* malloc(size_t __n) {
+	if (!__n) return NULL;
+# ifdef __DEBUG
+	print("malloc called.\n");
+# endif
+	if (!preped) {
+		ar_prepare();
+		preped = 1;
+	}
+	void *p = ar_alloc(__n);
+	return p;
+}
 
+void free(void *__p) {
+	if (!__p) return;
+# ifdef __DEBUG
+	print("free called.\n");
+# endif
+	ar_free(__p);
+}
+
+# include <string.h>
+void* realloc(void *__p, size_t __n) {
+# ifdef __DEBUG
+	print("called realloc.\n");
+# endif
+	if (!__n) return NULL;
+	if (!__p) return ar_alloc(__n);
+	return ar_realloc(__p, __n);
+}
 

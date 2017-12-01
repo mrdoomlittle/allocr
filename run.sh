@@ -1,1 +1,1 @@
-LD_PRELOAD=$PWD/allocr.so
+LD_PRELOAD=$PWD/lib/mdl-allocr.so
