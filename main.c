@@ -1,72 +1,102 @@
-# include "allocr.h"
-# include <stdio.h>
+# include <mdl/allocr.h>
 # include "print.h"
-extern struct allocr ar;
-void pr(struct allocrd*);
-void fr(struct allocrd*);
-void pa(struct arena*);
+void tst0(mdl_uint_t __c, mdl_uint_t __size) {
+	void *p1 = ar_alloc(__size);
+	mdl_uint_t i = 0;
+	while(i++ != __c) {
+		ar_free(p1);
+		ar_alloc(__size);
+	}
+	ar_free(p1);
+}
 
-struct arena* create_arena(struct allocr*);
-void* aa_blk(struct allocr*, struct arena*, mdl_uint_t);
-void af_blk(struct allocr*, struct arena*, void*);
-# include <time.h>
-# include <sys/resource.h>
-# include <sys/mman.h>
-# include <sys/unistd.h>
-void pr_data(void*, mdl_uint_t);
+void tst1(mdl_uint_t __c, mdl_uint_t __begin, mdl_uint_t __by) {
+	void **p = ar_alloc(__c*sizeof(void*));
+	mdl_uint_t i = 0, size = __begin;
 
-struct random_s {
-	mdl_u64_t a,b,c,d,e;
-} __attribute__((packed));
+	// alloc
+	while(i != __c) {
+		p[i] = ar_alloc(size);
+		i++;
+		size+= __by;
+	}
 
-int main() {
+	i = 0;
+	while(i != __c) {
+		ar_free(p[i]);
+		i++;
+	}
 
-	print("allocr init.\n");
-	ar_init(&ar);
+	ar_free(p);
+}
 
-	mdl_u8_t x = 0;
-	struct random_s *p1 = ar_alloc(&ar, sizeof(struct random_s));
-	struct random_s *p2 = ar_alloc(&ar, sizeof(struct random_s));
-	struct random_s *p3 = ar_alloc(&ar, sizeof(struct random_s));
-	struct random_s *p4 = ar_alloc(&ar, sizeof(struct random_s));
-	*p1 = (struct random_s) {.a = ~(mdl_u64_t)0, .b = ~(mdl_u64_t)0, .c = ~(mdl_u64_t)0, .d = ~(mdl_u64_t)0, .e = ~(mdl_u64_t)0};
-	*p2 = (struct random_s) {.a = ~(mdl_u64_t)0, .b = ~(mdl_u64_t)0, .c = ~(mdl_u64_t)0, .d = ~(mdl_u64_t)0, .e = ~(mdl_u64_t)0};
-	*p3 = (struct random_s) {.a = ~(mdl_u64_t)0, .b = ~(mdl_u64_t)0, .c = ~(mdl_u64_t)0, .d = ~(mdl_u64_t)0, .e = ~(mdl_u64_t)0};
-	*p4 = (struct random_s) {.a = ~(mdl_u64_t)0, .b = ~(mdl_u64_t)0, .c = ~(mdl_u64_t)0, .d = ~(mdl_u64_t)0, .e = ~(mdl_u64_t)0};
+void tst2() {
+	void *p1 = ar_alloc(20);
+	void *p2 = ar_alloc(80);
+	void *p3 = ar_alloc(20);
 
-//	void *p2 = ar_alloc(&ar, 240);
-//	void *p3 = ar_alloc(&ar, 688);
-//	void *p4 = ar_alloc(&ar, 1);
-//	void *p5 = ar_alloc(&ar, 1);
+	ar_free(p1);
+	ar_free(p2);
 
-	ar_free(&ar, p1);
-	ar_free(&ar, p2);
-	ar_free(&ar, p3);
-	ar_free(&ar, p4);
-//	ar_free(&ar, p5);
+	print("\n\n");
+	p1 = ar_alloc(10);
 
 
-//	struct rlimit rl = {
-//		.rlim_cur = 0,
-//		.rlim_max = 0
-//	};
-//	getrlimit(RLIMIT_DATA, &rl);
-//	print("cur: %d, max: %d\n", rl.rlim_cur, rl.rlim_max);
+	ar_free(p1);
+	ar_free(p3);
+}
 
+void tst3(mdl_uint_t __c, mdl_uint_t __begin, mdl_uint_t __by) {
+	mdl_uint_t i = 0, size = __begin;
+	void *p = ar_alloc(size);
+	while(i != __c) {
+		size+=__by;
+		p = ar_realloc(p, size);
+		i++;
+	}
 
-	pr(&ar.d);
-	fr(&ar.d);
-/*
-	struct arena *a1 = create_arena(&ar);
-	struct arena *a2 = create_arena(&ar);
+	ar_free(p);
+}
 
-	struct timespec begin, end;
-	clock_gettime(CLOCK_MONOTONIC, &begin);
-	aa_blk(&ar, a1, 20);
-	clock_gettime(CLOCK_MONOTONIC, &end);
-	print("time: %lu\n", (end.tv_nsec-begin.tv_nsec)+((end.tv_sec-begin.tv_sec)*1000000000));
+void tst4(mdl_uint_t __c, mdl_uint_t __size) {
+	mdl_uint_t i = 0;
+	void *p = ar_alloc(__size);
+	while(i != __c) {
+		void *t = ar_alloc(__size);
+		ar_free(p);
+		p = t;
+		i++;
+	}
+}
 
-	pa(a1);
-	pa(a2);
-*/
+void tst5() {
+	void *p1 = ar_alloc(1);
+	void *p2 = ar_alloc(4);
+	void *p3 = ar_alloc(8);
+	void *p4 = ar_alloc(16);
+	void *p5 = ar_alloc(32);
+	void *p6 = ar_alloc(64);
+	void *p7 = ar_alloc(128);
+	void *p8 = ar_alloc(200);
+}
+
+int main(void) {
+	ar_prepare();
+//	tst5();
+//	tst0(20, 20);
+//	tst1(20, 40);
+//	tst2();
+	tst3(100, 20, 20);
+///	tst4(200, 231);
+//	void *p1 = ar_alloc(128);
+//	p1 = ar_realloc(p1, 800);
+//	void *p3 = aras_alloc(20);
+//	void *p4 = ar_alloc(20);
+
+//	ar_free(p1);
+//	ar_free(p3);
+//	ar_free(p4);
+
+	pr();
+	ar_cleanup();
 }
